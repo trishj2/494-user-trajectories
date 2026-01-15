@@ -3,7 +3,7 @@
 ## How to Get Started
 
 1. [Fork](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/working-with-forks/fork-a-repo?tool=webui) this repository
-2. Clone your fork on a computer
+2. Clone your fork
 3. Create a Python environment on your computer
 4. Write code
 
@@ -18,7 +18,7 @@ Submissions should be complete by Tuesday at 11:59 PM.
 
 ## Setup Recommendations
 
-You are in charge of running your own Python code, which you can do either through the class's jupyterhub or on your own computer.Feel free to write code with whatever libraries you are comfortable with. The following are good defaults, if you aren't sure where to start:
+You are in charge of running your own Python code, which you can do either through the class's [JupyterHub](https://jupyter.rttl.uw.edu/2026-winter-info-494-a) or on your own computer. Feel free to write code with whatever libraries you are comfortable with. The following are good defaults, if you aren't sure where to start:
 
 - [uv](https://docs.astral.sh/uv/) for managing libraries
 - [marimo](https://marimo.io/) for notebooks
