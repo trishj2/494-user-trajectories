@@ -5,7 +5,8 @@
 1. [Fork](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/working-with-forks/fork-a-repo?tool=webui) this repository
 2. Clone your fork
 3. Create a Python environment on your computer
-4. Write code
+4. Create a folder for yourself in the `students` directory
+5. Write code in your directory
 
 ## How to Submit a Task
 
