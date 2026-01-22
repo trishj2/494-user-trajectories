@@ -15,7 +15,11 @@
 3. Submit a [pull request](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/creating-a-pull-request-from-a-fork). Your pull request should be named "#ISSUE_NUMBER FULL_NAME"
 4. Submit your report for the task on canvas
 
-Submissions should be complete by Tuesday at 11:59 PM.
+**Submissions should be complete by Tuesday at 11:59 PM.**
+
+## What do I do if I didn't finish my task?
+
+That's okay! Research is unpredictable, and tasks may end up being more difficult than we anticipated. When that happens, you can still get credit so long as you submit a PR and canvas report by TUESDAY night. Your report should describe the progress you were able to make, what you weren't able to complete, and what you would work on next to make more progress.
 
 ## Setup Recommendations
 
