@@ -3,3 +3,7 @@ secrets/*
 
 # But okay to include templates
 !secrets/*.templatestudents/trisha/notes-*.tsv
+
+# Ignore generated files
+students/trisha/notes-*.tsv
+.DS_Store
