@@ -2,4 +2,4 @@
 secrets/*
 
 # But okay to include templates
-!secrets/*.template
+!secrets/*.templatestudents/trisha/notes-*.tsv
