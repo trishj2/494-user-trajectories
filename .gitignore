@@ -7,3 +7,11 @@ secrets/*
 # Ignore generated files
 students/trisha/notes-*.tsv
 .DS_Store
+
+# local / generated junk
+.DS_Store
+.venv/
+**/.ipynb_checkpoints/
+students/trisha/secret/
+students/trisha/notes-*.tsv
+students/trisha/__marimo__/
