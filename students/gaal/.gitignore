@@ -1,0 +1,14 @@
+# Data files (too large for git)
+output/
+local-data/
+
+# Virtual environments
+.venv/
+venv/
+__pycache__/
+
+# Marimo session files
+__marimo__/
+
+# OS files
+.DS_Store

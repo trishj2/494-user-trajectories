@@ -1,12 +1,24 @@
-# Ignore secrets
-secrets/*
+# Secrets
+**/secrets/**
+!**/secrets/*.template
 
 # But okay to include templates
 !secrets/*.template
 
-# macOS metadata
-.DS_Store
-**/.DS_Store
-
 # Large data files
 data/*.parquet
+
+# Python environments
+**/venv/
+**/__pycache__/
+**/uv.lock
+**/pyproject.toml
+**/.python-version
+
+# OS files
+**/.DS_Store
+.DS_Store
+
+# Local datasets
+**/dataset 1.29/
+**/data/local/notes-00000.tsv
