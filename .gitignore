@@ -1,17 +1,17 @@
-# Ignore secrets
-secrets/*
+# Secrets
+**/secrets/**
+!**/secrets/*.template
 
-# But okay to include templates
-!secrets/*.template
+# Python environments
+**/venv/
+**/__pycache__/
+**/uv.lock
+**/pyproject.toml
+**/.python-version
 
-venv/
-data/local/notes-00000.tsv
-*/.DS_Store
-.DS_Store
+# OS files
+**/.DS_Store
 
-# Ignore local dataset
-dataset 1.29/
-
-uv.lock
-pyproject.toml
-.python-version
+# Local datasets
+**/dataset 1.29/
+**/data/local/notes-00000.tsv
