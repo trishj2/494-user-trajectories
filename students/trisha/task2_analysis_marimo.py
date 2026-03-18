@@ -4,6 +4,28 @@ __generated_with = "0.19.4"
 app = marimo.App()
 
 
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    # Task 2: User Behavior in Community Notes
+
+    This notebook:
+    1. **Feature Engineering** — computes per-user partisanship, skill, and behavior signals
+    2. **Analysis** — answers the 7 questions about partisanship, interests, and skill
+
+    **Data sources:**
+    - `notes-20240501-20240531.parquet` — individual rating events (6.4M rows; one row per user-rating of a note)
+    - `ratings-20240501-20240531.parquet` — individual notes authored (133K rows; one row per note written)
+
+    **Key columns:**
+    - `noteFinalFactor`: note's political lean from the Community Notes model (positive ≈ right-leaning, negative ≈ left-leaning)
+    - `noteFinalIntercept`: note's quality/helpfulness from the model (higher = more broadly helpful)
+    - `helpfulnessLevel`: how a rater labeled a note (HELPFUL / SOMEWHAT_HELPFUL / NOT_HELPFUL)
+    - `noteFinalRatingStatus`: a note's final community verdict (CURRENTLY_RATED_HELPFUL / CURRENTLY_RATED_NOT_HELPFUL / NEEDS_MORE_RATINGS)
+    """)
+    return
+
+
 @app.cell
 def _():
     import pandas as pd
@@ -25,9 +47,9 @@ def _():
 def _(mo):
     mo.md(r"""
     ---
+    ## Part 1 — Feature Engineering
 
-
-    Load data
+    ### 1.1  Load data
     """)
     return
 
@@ -72,7 +94,7 @@ def _(notes):
     agreed = (
         (notes['helpfulnessLevel'].isin(['HELPFUL', 'SOMEWHAT_HELPFUL']) &
          (notes['noteFinalRatingStatus'] == 'CURRENTLY_RATED_HELPFUL')) |
-        (notes['helpfulnessLevel'] == 'NOT_HELPFUL' &
+        ((notes['helpfulnessLevel'] == 'NOT_HELPFUL') &
          (notes['noteFinalRatingStatus'] == 'CURRENTLY_RATED_NOT_HELPFUL'))
     )
     notes['agreed'] = agreed & has_verdict
@@ -197,11 +219,15 @@ def _(user_features):
 def _(mo):
     mo.md(r"""
     ---
+    ## Part 2 — Analysis
+
+    > **Note on party signals:** The assignment also calls for signals derived from an external dataset mapping tweet IDs to the political party of the tweet author. Without that file, the note's `noteFinalFactor` is used as a partisanship proxy throughout — Community Notes research shows the factor is strongly correlated with the partisan lean of note content (positive ≈ right-leaning, negative ≈ left-leaning).
+
     ### Q1 — Does partisanship measured by note factors align with external party data?
 
-    We can assess this by checking whether a user's factor-based partisanship (avg factor of helpful vs. not helpful ratings) is self-consistent and whether users who lean right/left via factors show coherent behavior.
+    We can assess this *internally* by checking whether a user's factor-based partisanship (avg factor of helpful vs. not helpful ratings) is self-consistent and whether users who lean right/left via factors show coherent behavior.
 
-    What we expect: iff factors capture partisanship, users who rate right-leaning notes (positive factor) as helpful should have a positive`factor_diff.` Users who prefer left-leaning notes should have a negative `factor_diff`.
+    **Expected:** If factors capture partisanship, users who rate right-leaning notes (positive factor) as helpful should have a **positive** `factor_diff`; users who prefer left-leaning notes should have a **negative** `factor_diff`. The bimodal distribution below is the key signal.
     """)
     return
 
@@ -240,7 +266,7 @@ def _(plt, user_features):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    **Interpretation:** If the scatter is above the y = x line, users tend to rate higher-factor right-leaning notes as helpful and lower-factor notes as not helpful.  This is consistent with the external party data showing that contributors who cover Republican tweets tend to label right-aligned notes as helpful.
+    **Interpretation:** If the scatter is above the y = x line, users tend to rate higher-factor (right-leaning) notes as helpful and lower-factor notes as not helpful — consistent with the external party data showing that contributors who cover Republican-authored tweets tend to label right-aligned notes as helpful.
     """)
     return
 
@@ -259,10 +285,10 @@ def _(np, pd, plt, stats, user_features):
     _fig, _axes = plt.subplots(1, 2, figsize=(12, 4))
     plot_df = user_features.dropna(subset=['factor_diff', 'total_contributions']).copy()
     plot_df = plot_df[plot_df['total_contributions'] >= 5]
-    plot_df['log_contributions'] = np.log10(plot_df['total_contributions']) 
+    plot_df['log_contributions'] = np.log10(plot_df['total_contributions'])  # at least 5 contributions for stability
     _ax = _axes[0]
     _ax.scatter(plot_df['log_contributions'], plot_df['factor_diff'], alpha=0.05, s=4, color='steelblue')
-
+    # Left: scatter log(contributions) vs factor_diff
     from statsmodels.nonparametric.smoothers_lowess import lowess
     xvals = plot_df['log_contributions'].values
     yvals = plot_df['factor_diff'].values
@@ -278,7 +304,7 @@ def _(np, pd, plt, stats, user_features):
     plot_df['contrib_decile'] = pd.qcut(plot_df['total_contributions'], 10, labels=False)
     decile_stats = plot_df.groupby('contrib_decile')['factor_diff'].agg(['median', lambda x: x.quantile(0.25), lambda x: x.quantile(0.75)]).reset_index()
     decile_stats.columns = ['decile', 'median', 'q25', 'q75']
-
+    # Right: median factor_diff by contribution decile
     _ax.bar(decile_stats['decile'], decile_stats['median'], color=['steelblue' if v >= 0 else 'tomato' for v in decile_stats['median']])
     _ax.axhline(0, color='black', linestyle='--', linewidth=0.8)
     _ax.set_xlabel('Contribution Decile (1=least active → 10=most active)')
@@ -287,8 +313,8 @@ def _(np, pd, plt, stats, user_features):
     plt.tight_layout()
     plt.savefig('q2_frequency_vs_partisanship.png', bbox_inches='tight')
     plt.show()
-    r, p = stats.spearmanr(plot_df['log_contributions'], plot_df['factor_diff'].abs())
-    print(f'Spearman r (|factor_diff| vs log contributions): {r:.3f}  (p={p:.3e})')
+    _r, p = stats.spearmanr(plot_df['log_contributions'], plot_df['factor_diff'].abs())
+    print(f'Spearman r (|factor_diff| vs log contributions): {_r:.3f}  (p={p:.3e})')
     return
 
 
@@ -319,11 +345,11 @@ def _(np, plt, user_features):
     left_biased = [(bias_df['factor_diff'] < -t).mean() * 100 for t in thresholds]
     right_biased = [(bias_df['factor_diff'] > t).mean() * 100 for t in thresholds]
     # Right: stacked bar — how many users have strong bias in each direction
-    neutral = [100 - l - r for l, r in zip(left_biased, right_biased)]
+    neutral = [100 - l - _r for l, _r in zip(left_biased, right_biased)]
     x = np.arange(len(thresholds))
     b1 = _ax.bar(x, left_biased, label='Left-biased', color='steelblue')
     b2 = _ax.bar(x, neutral, bottom=left_biased, label='Neutral', color='lightgray')
-    b3 = _ax.bar(x, right_biased, bottom=[l + n for l, n in zip(left_biased, neutral)], label='Right-biased', color='tomato')
+    b3 = _ax.bar(x, right_biased, bottom=[l + _n for l, _n in zip(left_biased, neutral)], label='Right-biased', color='tomato')
     _ax.set_xticks(x)
     _ax.set_xticklabels([f'|diff| > {t}' for t in thresholds])
     _ax.set_ylabel('% of Users')
@@ -359,9 +385,9 @@ def _(notes, np, pd, plt, rater_features):
     pivot.columns = ['_'.join(c) for c in pivot.columns]
     pivot = pivot.reset_index()
     # Per rater: count ratings by note lean and helpfulness level
-    for col in ['left_HELPFUL', 'left_NOT_HELPFUL', 'right_HELPFUL', 'right_NOT_HELPFUL']:
-        if col not in pivot.columns:
-            pivot[col] = 0
+    for _col in ['left_HELPFUL', 'left_NOT_HELPFUL', 'right_HELPFUL', 'right_NOT_HELPFUL']:
+        if _col not in pivot.columns:
+            pivot[_col] = 0
     left_cols = [c for c in pivot.columns if c.startswith('left_')]
     right_cols = [c for c in pivot.columns if c.startswith('right_')]
     pivot['total_left'] = pivot[left_cols].sum(axis=1)
@@ -405,6 +431,8 @@ def _(mo):
     mo.md(r"""
     ---
     ### Q5 — Do users focus on a single topic, or do they mix topics?
+
+    > **Note:** Topic labels require an external tweet-author metadata file (party/topic CSV). Without that file, we use the number of **unique tweets** a user interacted with as a breadth proxy. A user who interacts with many tweets likely spans more topics than one who repeatedly annotates the same post.
     """)
     return
 
@@ -458,13 +486,13 @@ def _(np, pd, plt, user_features):
     uf['tweet_diversity_rating'] = uf['n_unique_tweets_rated'] / (uf['n_ratings'] + 1e-09)
     uf['tweet_diversity_writing'] = uf['n_unique_tweets_written'] / (uf['n_notes_written'] + 1e-09)
     _fig, _axes = plt.subplots(1, 2, figsize=(12, 4))
-    for _ax, xcol, ycol, color, title in [(_axes[0], 'n_ratings', 'tweet_diversity_rating', 'steelblue', 'Raters: Frequency vs Topic Diversity'), (_axes[1], 'n_notes_written', 'tweet_diversity_writing', 'seagreen', 'Authors: Frequency vs Topic Diversity')]:
-        sub = uf.dropna(subset=[xcol, ycol])
-        sub = sub[sub[xcol] >= 5]
-        _ax.scatter(np.log10(sub[xcol] + 1), sub[ycol], alpha=0.05, s=4, color=color)
-        sub['decile'] = pd.qcut(sub[xcol], 10, labels=False, duplicates='drop')
-        dmed = sub.groupby('decile')[ycol].median().reset_index()
-        _ax.plot(sub.groupby('decile')[xcol].median().apply(lambda x: np.log10(x + 1)).values, dmed[ycol].values, 'r-o', linewidth=2, markersize=5, label='Decile median')
+    for _ax, xcol, ycol, _color, title in [(_axes[0], 'n_ratings', 'tweet_diversity_rating', 'steelblue', 'Raters: Frequency vs Topic Diversity'), (_axes[1], 'n_notes_written', 'tweet_diversity_writing', 'seagreen', 'Authors: Frequency vs Topic Diversity')]:
+        _sub = uf.dropna(subset=[xcol, ycol])
+        _sub = _sub[_sub[xcol] >= 5]
+        _ax.scatter(np.log10(_sub[xcol] + 1), _sub[ycol], alpha=0.05, s=4, color=_color)
+        _sub['decile'] = pd.qcut(_sub[xcol], 10, labels=False, duplicates='drop')
+        dmed = _sub.groupby('decile')[ycol].median().reset_index()
+        _ax.plot(_sub.groupby('decile')[xcol].median().apply(lambda x: np.log10(x + 1)).values, dmed[ycol].values, 'r-o', linewidth=2, markersize=5, label='Decile median')
         _ax.set_xlabel('log₁₀(Contributions)')
         _ax.set_ylabel('Unique Tweets / Total Ratings')
         _ax.set_title(title)  # Decile medians
@@ -537,23 +565,305 @@ def _(np, pd, plt, stats, user_features):
 def _(mo):
     mo.md(r"""
     ---
-    ## Findings
+    ## Summary of Findings
 
-
-    Question 1: Users who rate right-leaning notes as helpful have a higher avg_factor_helpful than avg_factor_not_helpful, and vice versa for left-leaning raters. The factor_diff is internally consistent — users above the y=x line prefer right-leaning notes, those below prefer left-leaning notes. This directional split aligns with the expectation that external party labels would predict the same groups.
-
-    Question 2: There is a small but highly significant positive correlation between contribution frequency and |factor_diff| (Spearman r ≈ 0.08, p < 10⁻²³⁰). More active contributors tend to show a slightly stronger partisan lean.
-
-    Question 3: About 46% of users are left-biased and ~45% are right-biased at the |diff|>0.1 threshold. The distribution is roughly symmetric with only ~9% neutral, indicating most contributors show a consistent partisan preference when rating notes as helpful or not helpful.
-
-    Question 4: Users who rate one side helpful strongly also rate more notes from that side. "Strong Left" users rate ~13 left-leaning notes vs ~10 right-leaning notes (median). "Strong Right" users show the opposite. The helpfulness asymmetry mirrors the volume asymmetry.
-
-    Question 5: Most users are highly focused: median tweets rated = 3, median tweets written about = 1. The distribution is heavily right-skewed. A small group of power users spans many more tweets and topics than the typical contributor.
-
-    Question 6: More active users cover more tweets in absolute terms, but their tweet diversity ratio (unique tweets / total ratings) falls as contributions increase.  Frequent contributors tend to revisit the same set of tweets rather than broadening their scope.
-
-    Question 7: More bigger note writers earn helpful labels more often (Spearman r ≈ 0.21 for pct_notes_helpful). Note intercept shows a weak positive trend (r ≈ 0.03). Surprisingly, rater agreement rate decreases with rating frequency (r ≈ -0.22), suggesting very active raters may be more partisan or rate notes before community consensus stabilizes.
+    | Question | Key Finding |
+    |---|---|
+    | **Q1 — Factor alignment with party data** | Users who rate right-leaning notes (positive factor) as helpful have a higher `avg_factor_helpful` than `avg_factor_not_helpful`, and vice versa for left-leaning raters. The `factor_diff` is internally consistent — users above the y=x line prefer right-leaning notes, those below prefer left-leaning notes. This directional split aligns with the expectation that external party labels would predict the same groups. |
+    | **Q2 — Frequency vs partisanship** | Small but highly significant positive correlation between contribution frequency and |factor_diff| (Spearman r ≈ 0.08, p < 10⁻²³⁰). More active contributors tend to exhibit slightly stronger partisan lean. |
+    | **Q3 — Systematic rating bias** | ~46% of users are left-biased (prefer left-leaning notes as helpful) and ~45% are right-biased at the |diff|>0.1 threshold. The distribution is roughly symmetric with only ~9% neutral, indicating most contributors show a consistent partisan preference. |
+    | **Q4 — Volume by partisan side** | Users who rate one side helpful strongly also rate *more* notes from that side. "Strong Left" users rate ~13 left-leaning notes vs ~10 right-leaning notes (median); "Strong Right" users show the inverse. The helpfulness asymmetry mirrors the volume asymmetry. |
+    | **Q5 — Topic focus** | Most users are highly focused: median tweets rated = 3, median tweets written about = 1. The distribution is heavily right-skewed — a small group of power users spans many more tweets/topics. |
+    | **Q6 — Frequency vs topic focus** | More active users cover more tweets in absolute terms, but their tweet diversity ratio (unique tweets / total ratings) falls as contributions increase — frequent contributors tend to revisit the same set of tweets rather than broadening their scope. |
+    | **Q7 — Frequency vs skill** | More prolific *note writers* earn helpful labels more often (Spearman r ≈ 0.21 for pct_notes_helpful). Note intercept shows a weak positive trend (r ≈ 0.03). Surprisingly, rater agreement rate *decreases* with rating frequency (r ≈ -0.22), suggesting very active raters may be more partisan or rate notes before their community consensus stabilizes. |
     """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ---
+    ## Part 3 — Week 7 Follow-up Tasks
+
+    New analyses building on Ryder's and Sunghee's work from last week.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Task 1 — Ryder's "Avg Final Note Factor vs Note Writing Frequency" with LOESS
+
+    Replicate Ryder's scatter plots but replace regression lines with LOESS smoothing.
+    """)
+    return
+
+
+@app.cell
+def _(author_features, np, plt):
+    from statsmodels.nonparametric.smoothers_lowess import lowess as sm_lowess
+    plot_df_1 = author_features.dropna(subset=['n_notes_written', 'avg_note_factor_written']).copy()
+    plot_df_1 = plot_df_1[plot_df_1['n_notes_written'] >= 1]
+
+    def loess_line(log_x, y, frac=0.4):
+        trend = sm_lowess(y, log_x, frac=frac, return_sorted=True)
+        return (10 ** trend[:, 0], trend[:, 1])
+    groups = [('Low factor (< -0.25)', plot_df_1['avg_note_factor_written'] < -0.25), ('Neutral (-0.25 to 0.25)', (plot_df_1['avg_note_factor_written'] >= -0.25) & (plot_df_1['avg_note_factor_written'] <= 0.25)), ('High factor (> 0.25)', plot_df_1['avg_note_factor_written'] > 0.25)]
+    _fig = plt.figure(figsize=(20, 9))
+    _gs = _fig.add_gridspec(2, 3, hspace=0.45, wspace=0.35)
+    _ax_main = _fig.add_subplot(_gs[0, :])
+    _ax_subs = [_fig.add_subplot(_gs[1, i]) for i in range(3)]
+    _log_x = np.log10(plot_df_1['n_notes_written'])
+    _xs_orig, _ys_loess = loess_line(_log_x.values, plot_df_1['avg_note_factor_written'].values)
+    _r = np.corrcoef(_log_x, plot_df_1['avg_note_factor_written'])[0, 1]
+    _ax_main.scatter(plot_df_1['n_notes_written'], plot_df_1['avg_note_factor_written'], alpha=0.15, s=5, color='steelblue')
+    _ax_main.plot(_xs_orig, _ys_loess, color='red', lw=2, label=f'LOESS (r={_r:.3f})')
+    _ax_main.axhline(0, color='black', linestyle='--', lw=0.8)
+    _ax_main.set_xscale('log')
+    _ax_main.set_xlabel('Number of Notes Written (log scale)')
+    _ax_main.set_ylabel('Average Final Note Factor')
+    _ax_main.set_title('Average Final Note Factor vs Note Writing Frequency')
+    _ax_main.legend()
+    for _ax, (_label, _mask) in zip(_ax_subs, groups):
+        _sub = plot_df_1[_mask]
+        _n = len(_sub)
+        _ax.scatter(_sub['n_notes_written'], _sub['avg_note_factor_written'], alpha=0.2, s=5, color='steelblue')
+        if _n > 30:
+            _lg_x = np.log10(_sub['n_notes_written'])
+            _xs_o, _ys_l = loess_line(_lg_x.values, _sub['avg_note_factor_written'].values, frac=0.4)
+            _ax.plot(_xs_o, _ys_l, color='red', lw=2)
+            _r_g = np.corrcoef(_lg_x, _sub['avg_note_factor_written'])[0, 1]
+        else:
+            _r_g = float('nan')
+        _ax.set_xscale('log')
+        _ax.set_xlabel('Number of Notes Written (log scale)')
+        _ax.set_ylabel('Average Final Note Factor')
+        _ax.set_title(f'{_label}\n(r={_r_g:.3f}, n={_n:,})')
+        _ax.axhline(0, color='black', linestyle='--', lw=0.8)
+    plt.savefig('task1_ryder_loess.png', bbox_inches='tight')
+    plt.show()
+    return loess_line, plot_df_1, sm_lowess
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Task 2 — Same plots with |Average Final Note Factor| on Y axis
+    """)
+    return
+
+
+@app.cell
+def _(loess_line, np, plot_df_1, plt):
+    plot_df_1['abs_avg_factor'] = plot_df_1['avg_note_factor_written'].abs()
+    groups_abs = [('Low |factor| (< 0.1)', plot_df_1['abs_avg_factor'] < 0.1), ('Mid |factor| (0.1-0.5)', (plot_df_1['abs_avg_factor'] >= 0.1) & (plot_df_1['abs_avg_factor'] <= 0.5)), ('High |factor| (> 0.5)', plot_df_1['abs_avg_factor'] > 0.5)]
+    _fig = plt.figure(figsize=(20, 9))
+    _gs = _fig.add_gridspec(2, 3, hspace=0.45, wspace=0.35)
+    _ax_main = _fig.add_subplot(_gs[0, :])
+    _ax_subs = [_fig.add_subplot(_gs[1, i]) for i in range(3)]
+    _log_x = np.log10(plot_df_1['n_notes_written'])
+    _xs_orig, _ys_loess = loess_line(_log_x.values, plot_df_1['abs_avg_factor'].values)
+    _r = np.corrcoef(_log_x, plot_df_1['abs_avg_factor'])[0, 1]
+    _ax_main.scatter(plot_df_1['n_notes_written'], plot_df_1['abs_avg_factor'], alpha=0.15, s=5, color='steelblue')
+    _ax_main.plot(_xs_orig, _ys_loess, color='red', lw=2, label=f'LOESS (r={_r:.3f})')
+    _ax_main.set_xscale('log')
+    _ax_main.set_xlabel('Number of Notes Written (log scale)')
+    _ax_main.set_ylabel('|Average Final Note Factor|')
+    _ax_main.set_title('|Average Final Note Factor| vs Note Writing Frequency')
+    _ax_main.legend()
+    for _ax, (_label, _mask) in zip(_ax_subs, groups_abs):
+        _sub = plot_df_1[_mask]
+        _n = len(_sub)
+        _ax.scatter(_sub['n_notes_written'], _sub['abs_avg_factor'], alpha=0.2, s=5, color='steelblue')
+        if _n > 30:
+            _lg_x = np.log10(_sub['n_notes_written'])
+            _xs_o, _ys_l = loess_line(_lg_x.values, _sub['abs_avg_factor'].values, frac=0.4)
+            _ax.plot(_xs_o, _ys_l, color='red', lw=2)
+            _r_g = np.corrcoef(_lg_x, _sub['abs_avg_factor'])[0, 1]
+        else:
+            _r_g = float('nan')
+        _ax.set_xscale('log')
+        _ax.set_xlabel('Number of Notes Written (log scale)')
+        _ax.set_ylabel('|Average Final Note Factor|')
+        _ax.set_title(f'{_label}\n(r={_r_g:.3f}, n={_n:,})')
+    plt.savefig('task2_abs_factor_loess.png', bbox_inches='tight')
+    plt.show()
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Task 3 — Sunghee's "Contribution Frequency vs Partisanship" for NOT HELPFUL ratings
+
+    Replicate Sunghee's scatter but put average party of notes rated **not helpful** on the Y axis.
+    """)
+    return
+
+
+@app.cell
+def _(np, pd, plt, rater_features, stats):
+    # Load shared user_signals (pre-computed with external party data)
+    signals = pd.read_csv('../../data/user_signals.csv')
+    rc = rater_features.set_index('raterParticipantId')['n_ratings']
+    signals['rating_count'] = signals['userID'].map(rc)
+    active = signals[signals['rating_count'] > 10].dropna(subset=['avg_party_rated_not_helpful', 'avg_party_rated_helpful', 'rating_count'])
+    _fig, _axes = plt.subplots(1, 2, figsize=(14, 5))
+    _ax = _axes[0]
+    _ax.scatter(active['rating_count'], active['avg_party_rated_not_helpful'], alpha=0.15, s=5, color='steelblue')
+    _ax.axhline(0, color='red', linestyle='--', alpha=0.6)
+    _ax.set_xscale('log')
+    _ax.set_xlabel('Number of Ratings')
+    _ax.set_ylabel('Avg Party Rated Not Helpful (-1=Rep, 1=Dem)')
+    _ax.set_title('Contribution Frequency vs Partisanship\n(Not Helpful ratings, >100 ratings)')
+    _ax = _axes[1]
+    _ax.scatter(active['rating_count'], active['avg_party_rated_helpful'], alpha=0.15, s=5, color='steelblue', label='Helpful')
+    _ax.scatter(active['rating_count'], active['avg_party_rated_not_helpful'], alpha=0.15, s=5, color='tomato', label='Not Helpful')
+    _ax.axhline(0, color='black', linestyle='--', lw=0.8)
+    _ax.set_xscale('log')
+    _ax.set_xlabel('Number of Ratings')
+    _ax.set_ylabel('Avg Party of Rated Notes (-1=Rep, 1=Dem)')
+    _ax.set_title('Helpful vs Not Helpful Party Lean\n(>100 ratings)')
+    _ax.legend()
+    plt.tight_layout()
+    plt.savefig('task3_sunghee_not_helpful.png', bbox_inches='tight')
+    plt.show()
+    r_h, p_h = stats.spearmanr(np.log(active['rating_count']), active['avg_party_rated_helpful'].fillna(0))
+    r_nh, p_nh = stats.spearmanr(np.log(active['rating_count']), active['avg_party_rated_not_helpful'].fillna(0))
+    print(f'Spearman r (freq vs avg party helpful):     {r_h:.3f}  p={p_h:.2e}')
+    print(f'Spearman r (freq vs avg party not helpful): {r_nh:.3f}  p={p_nh:.2e}')
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Task 4 — Pro/Anti Republican/Democrat rating mix for high-frequency raters
+
+    For raters with >100 ratings, classify each rating by note factor (proxy for tweet author party)
+    and note classification (Misleading vs Not Misleading) per the taxonomy:
+
+    | Factor | Classification | Helpfulness | Label |
+    |---|---|---|---|
+    | Positive (Rep) | Misleading | Helpful | Anti Rep |
+    | Positive (Rep) | Misleading | Not Helpful | Pro Rep |
+    | Positive (Rep) | Not Misleading | Helpful | Pro Rep |
+    | Positive (Rep) | Not Misleading | Not Helpful | Anti Rep |
+    | Negative (Dem) | Misleading | Helpful | Anti Dem |
+    | Negative (Dem) | Misleading | Not Helpful | Pro Dem |
+    | Negative (Dem) | Not Misleading | Helpful | Pro Dem |
+    | Negative (Dem) | Not Misleading | Not Helpful | Anti Dem |
+    """)
+    return
+
+
+@app.cell
+def _(notes, np, plt, rater_features, ratings):
+    note_class = ratings[['noteId', 'classification']].copy()
+    note_class['is_misleading'] = note_class['classification'] == 'MISINFORMED_OR_POTENTIALLY_MISLEADING'
+    notes_cls = notes.merge(note_class[['noteId', 'is_misleading']], on='noteId', how='left')
+    rep_lean = notes_cls['noteFinalFactor'] > 0.25
+    dem_lean = notes_cls['noteFinalFactor'] < -0.25
+    m_note = notes_cls['is_misleading'] == True
+    nm_note = notes_cls['is_misleading'] == False
+    h_mask = notes_cls['helpfulnessLevel'].isin(['HELPFUL', 'SOMEWHAT_HELPFUL'])
+    nh_mask = notes_cls['helpfulnessLevel'] == 'NOT_HELPFUL'
+    conditions = [rep_lean & m_note & h_mask, rep_lean & m_note & nh_mask, rep_lean & nm_note & h_mask, rep_lean & nm_note & nh_mask, dem_lean & m_note & h_mask, dem_lean & m_note & nh_mask, dem_lean & nm_note & h_mask, dem_lean & nm_note & nh_mask]
+    choices = ['Anti Rep', 'Pro Rep', 'Pro Rep', 'Anti Rep', 'Anti Dem', 'Pro Dem', 'Pro Dem', 'Anti Dem']
+    notes_cls['rating_label'] = np.select(conditions, choices, default='Unknown')
+    hf_raters = rater_features[rater_features['n_ratings'] > 100]['raterParticipantId']
+    hf = notes_cls[notes_cls['raterParticipantId'].isin(hf_raters) & (notes_cls['rating_label'] != 'Unknown')]
+    label_counts = hf.groupby(['raterParticipantId', 'rating_label']).size().unstack(fill_value=0)
+    for _col in ['Pro Rep', 'Anti Rep', 'Pro Dem', 'Anti Dem']:
+        if _col not in label_counts.columns:
+            label_counts[_col] = 0
+    label_pct = label_counts.div(label_counts.sum(axis=1), axis=0)
+    np.random.seed(42)
+    sample = label_pct.sample(min(100, len(label_pct)), random_state=42)
+    sample = sample.sort_values('Pro Rep', ascending=True)
+    _fig, _ax = plt.subplots(figsize=(10, 14))
+    colors = {'Pro Rep': '#d73027', 'Anti Rep': '#91bfdb', 'Pro Dem': '#4575b4', 'Anti Dem': '#fc8d59'}
+    bottom = np.zeros(len(sample))
+    for _label in ['Pro Dem', 'Anti Rep', 'Anti Dem', 'Pro Rep']:
+        vals = sample[_label].values
+        _ax.barh(range(len(sample)), vals, left=bottom, label=_label, color=colors[_label], edgecolor='none')
+        bottom = bottom + vals
+    _ax.set_yticks([])
+    _ax.set_xlabel('Proportion of Classified Ratings')
+    _ax.set_title('Rating Mix: Pro/Anti Republican/Democrat\nHigh-frequency raters (>100 ratings), ~100 user sample\nsorted by Pro-Republican tendency')
+    _ax.legend(loc='lower right')
+    _ax.set_xlim(0, 1)
+    plt.tight_layout()
+    plt.savefig('task4_stacked_bar.png', bbox_inches='tight')
+    plt.show()
+    print(f'High-frequency raters: {len(hf_raters):,}')
+    pct_classified = (notes_cls[notes_cls['raterParticipantId'].isin(hf_raters)]['rating_label'] != 'Unknown').mean() * 100
+    print(f'Classified ratings: {pct_classified:.1f}% of their ratings have a label')
+    print('\nMean proportions across all high-freq raters:')
+    print(label_pct[['Pro Rep', 'Anti Rep', 'Pro Dem', 'Anti Dem']].mean().round(3))
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Task 5 — Rating accuracy with updated "correct" definition + LOESS
+
+    Updated correctness rule:
+    - **Correct** if rated `HELPFUL`/`SOMEWHAT_HELPFUL` AND note earned `CURRENTLY_RATED_HELPFUL`
+    - **Also correct** if rated `NOT_HELPFUL` AND note earned `CURRENTLY_RATED_NOT_HELPFUL` **or** `NEEDS_MORE_RATINGS`
+
+    Replace the regression line with LOESS.
+    """)
+    return
+
+
+@app.cell
+def _(notes, np, pd, plt, rater_features, sm_lowess, stats):
+    # New correctness definition
+    new_correct = notes['helpfulnessLevel'].isin(['HELPFUL', 'SOMEWHAT_HELPFUL']) & (notes['noteFinalRatingStatus'] == 'CURRENTLY_RATED_HELPFUL') | (notes['helpfulnessLevel'] == 'NOT_HELPFUL') & notes['noteFinalRatingStatus'].isin(['CURRENTLY_RATED_NOT_HELPFUL', 'NEEDS_MORE_RATINGS'])
+    new_pct_correct = new_correct.groupby(notes['raterParticipantId']).mean().rename('new_pct_correct')
+    skill_new = pd.DataFrame({'rating_freq': rater_features.set_index('raterParticipantId')['n_ratings']})
+    skill_new = skill_new.join(new_pct_correct).dropna()
+    skill_new = skill_new[skill_new['rating_freq'] >= 10]
+    log_freq = np.log10(skill_new['rating_freq'])
+    trend_vals = sm_lowess(skill_new['new_pct_correct'].values, log_freq.values, frac=0.3, return_sorted=True)
+    _xs_orig = 10 ** trend_vals[:, 0]
+    _r = np.corrcoef(log_freq, skill_new['new_pct_correct'])[0, 1]
+    _fig, _axes = plt.subplots(1, 2, figsize=(14, 5))
+    _ax = _axes[0]
+    _ax.scatter(skill_new['rating_freq'], skill_new['new_pct_correct'], alpha=0.3, s=8, color='steelblue')
+    _ax.plot(_xs_orig, trend_vals[:, 1], color='red', lw=2, label=f'LOESS (r={_r:.3f})')
+    _ax.set_xscale('log')
+    _ax.set_xlabel('Number of Ratings Given (log scale)')
+    _ax.set_ylabel('Percent Correct Ratings (new definition)')
+    _ax.set_title(f'Rating frequency vs pct correct ratings\n(new definition, LOESS, r={_r:.3f})')
+    _ax.legend()
+    old_correct_rate = notes[notes['has_verdict']].groupby('raterParticipantId')['agreed'].mean().rename('old_pct_correct')
+    both = skill_new.join(old_correct_rate, how='left').dropna(subset=['old_pct_correct'])
+    both = both[both['rating_freq'] >= 10]
+    _ax = _axes[1]
+    _ax.scatter(both['rating_freq'], both['old_pct_correct'], alpha=0.15, s=6, color='tomato', label='Old (verdict-only denominator)')
+    _ax.scatter(both['rating_freq'], both['new_pct_correct'], alpha=0.15, s=6, color='steelblue', label='New (NMR counts for NOT_HELPFUL)')
+    for _col, _color in [('old_pct_correct', 'darkred'), ('new_pct_correct', 'navy')]:
+        lf = np.log10(both['rating_freq'])
+        tr = sm_lowess(both[_col].values, lf.values, frac=0.3, return_sorted=True)
+        _ax.plot(10 ** tr[:, 0], tr[:, 1], color=_color, lw=2)
+    _ax.set_xscale('log')
+    _ax.set_xlabel('Number of Ratings Given (log scale)')
+    _ax.set_ylabel('Percent Correct Ratings')
+    _ax.set_title('Old vs New Correctness Definition\n(LOESS smoothed)')
+    _ax.legend(fontsize=9)
+    plt.tight_layout()
+    plt.savefig('task5_correct_ratings_loess.png', bbox_inches='tight')
+    plt.show()
+    r_old, _ = stats.spearmanr(np.log(both['rating_freq']), both['old_pct_correct'])
+    r_new, _ = stats.spearmanr(np.log(both['rating_freq']), both['new_pct_correct'])
+    print(f'Spearman r (freq vs old pct correct): {r_old:.3f}')
+    print(f'Spearman r (freq vs new pct correct): {r_new:.3f}')
+    print(f'Mean pct correct -- old: {both['old_pct_correct'].mean():.3f}  new: {both['new_pct_correct'].mean():.3f}')
     return
 
 
