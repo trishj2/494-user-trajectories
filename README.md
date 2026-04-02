@@ -12,10 +12,12 @@
 
 ## How to Submit a Task
 
-1. Once your code is ready to submit, perform a [git pull](https://github.com/git-guides/git-pull) to integrate recent changes from others.
-2. Make a [commit](https://docs.github.com/en/pull-requests/committing-changes-to-your-project/creating-and-editing-commits/about-commits)
-3. Make sure you don't commit any data or personal files!
-4. Submit a [pull request](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/creating-a-pull-request-from-a-fork). Your pull request should be named "WEEK_NUMBER FULL_NAME"
+1. Once your work is ready to submit, perform a [git pull](https://github.com/git-guides/git-pull) to integrate recent changes from others.
+2. If you are submitting writing, your commit should contain a pdf; if you are submitting analysis, your commit should contain code, figures, notebooks, etc.
+3. Make a [commit](https://docs.github.com/en/pull-requests/committing-changes-to-your-project/creating-and-editing-commits/about-commits).
+4. Make sure you don't commit any data or personal files!
+5. Submit a [pull request](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/creating-a-pull-request-from-a-fork). Your pull request should be named "FULL_NAME"
+6. Tag the issue you were responding to in your PR.
 
 **Submissions should be complete by Tuesday at 11:59 PM.**
 
