@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.22.4"
+__generated_with = "0.23.1"
 app = marimo.App(width="medium")
 
 
@@ -22,11 +22,17 @@ def _(Path):
 
 
 @app.cell
+def _():
+    return
+
+
+@app.cell
 def _(DATA_DIR, pl):
     def _enrich_with_scores(
         notes: pl.DataFrame, ratings: pl.DataFrame,
     ) -> tuple[pl.DataFrame, pl.DataFrame]:
-        scores      = pl.read_parquet(DATA_DIR / "2026-02-03-scored_notes.parquet")
+        scores = pl.read_parquet(DATA_DIR / "2026-02-03-scored_notes.parquet")
+        scores = scores.with_columns(noteId=pl.col("noteId").cast(pl.String))
         I_AND_F_COLUMNS = {
             "CoreModel (v1.1)": ("coreNoteIntercept", "coreNoteFactor1"),
             "ExpansionModel (v1.1)": ("expansionNoteIntercept", "expansionNoteFactor1"),
@@ -87,12 +93,61 @@ def _(DATA_DIR, pl):
         ratings = ratings.join(scores, on="noteId", how="left", coalesce=True, validate="m:1")
         return notes, ratings
 
+
+    def _enrich_with_tweet_author_ids(
+        notes: pl.DataFrame,
+    ) -> pl.DataFrame:
+        tweet_authors = (
+            pl.scan_parquet("/data/cn_archive/derivatives/20260227_raw_posts.parquet")
+            .select("post_id", "author_id")
+            .filter(pl.col("author_id").is_not_null())
+            .unique()
+            .collect()
+        )
+    
+        notes = notes.join(
+            tweet_authors.rename({"post_id": "tweetId", "author_id": "tweet_author_id"}),
+            on="tweetId",
+            how="left",
+            coalesce=True,
+            validate="m:1"
+        )
+        return notes
+
+
+    def _enrich_with_post_lang(
+        notes: pl.DataFrame,
+    ) -> pl.DataFrame:
+        langs = (
+            pl.scan_parquet("/data/cn_archive/derivatives/20260227_raw_posts.parquet")
+            .select("post_id", "lang")
+            .filter(pl.col("lang").is_not_null())
+            .unique()
+            .collect()
+        )
+        notes = notes.join(
+            langs.rename({"post_id": "tweetId", "lang": "tweet_lang"}),
+            on="tweetId",
+            how="left",
+            coalesce=True,
+            validate="m:1"
+        )
+        return notes
+
     renault = pl.read_csv(DATA_DIR / "renault_partisanship_labels.csv", schema_overrides={"note_id": pl.String, "tweet_author_id": pl.String, "tweet_id": pl.String})
     _raw_notes=pl.read_parquet(DATA_DIR / "2026-02-03/notes.parquet")
     _raw_ratings=pl.read_parquet(DATA_DIR / "2026-02-03/noteRatings.parquet")
 
-
-    notes, _ =_enrich_with_scores(notes=_raw_notes, ratings=_raw_ratings)
+    notes = _raw_notes.with_columns(
+        tweetId=pl.col("tweetId").cast(pl.String),
+        noteId=pl.col("noteId").cast(pl.String),
+    )
+    ratings = _raw_ratings.with_columns(
+        noteId=pl.col("noteId").cast(pl.String),
+    )
+    notes, _ =_enrich_with_scores(notes=notes, ratings=ratings)
+    notes = _enrich_with_tweet_author_ids(notes=notes)
+    notes = _enrich_with_post_lang(notes=notes)
     return notes, renault
 
 
@@ -107,6 +162,98 @@ def _(notes, pl, renault):
         .join(renault.select("note_id","party"), coalesce=True, how="full", left_on="noteId", right_on="note_id")
     )
     return (party_and_factor,)
+
+
+@app.cell
+def _(pl):
+    _user_ideology_barbera = (
+        pl.read_csv("../../data/mosleh/07-user_ideology-barbera.csv",
+                   schema_overrides={"id_str": pl.String, "ideo": pl.Float64}, null_values=["NA"])
+        .drop("")
+        .rename({"id_str": "tweet_author_id", "ideo": "ideologyBarbera"})
+    )
+    _user_ideology_barbera_unhelpful = (
+        pl.read_csv("../../data/mosleh/07b-user_ideology-barbera-unhelpful.csv",
+                   schema_overrides={"id_str": pl.String, "ideo": pl.Float64}, null_values=["NA"])
+        .drop("")
+        .rename({"id_str": "tweet_author_id", "ideo": "ideologyBarberaUnhelpful"})
+    )
+    _barbera_mosleh_gpt = (
+        pl.read_excel("../../data/mosleh/barbera_mosleh_gpt.xlsx")
+        .drop("__UNNAMED__0")
+    )
+    _barbera_mosleh_perplexity = (
+        pl.read_excel("../../data/mosleh/barbera_mosleh_perplexity.xlsx")
+        .drop("__UNNAMED__0")
+    )
+
+    ideologies = (
+        _user_ideology_barbera
+        .join(_user_ideology_barbera_unhelpful, on="tweet_author_id", 
+              how="full", validate="1:1", coalesce=True)
+        .join(_barbera_mosleh_gpt, on="tweet_author_id", 
+              how="full", validate="1:1", coalesce=True)
+        .join(_barbera_mosleh_perplexity, on="tweet_author_id", 
+              how="full", validate="1:1", coalesce=True)
+        .filter(
+            pl.any_horizontal(
+                pl.selectors.exclude("tweet_author_id").is_not_null()
+            )
+        )
+    )
+    return (ideologies,)
+
+
+@app.cell
+def _(notes):
+    notes
+    return
+
+
+@app.cell
+def _(ideologies, notes, pl, renault):
+    (
+        notes
+        .filter(pl.col("tweet_lang") == "en")
+        .join(ideologies.with_columns(ideoAvailable=pl.lit(True)), 
+              on="tweet_author_id", how="left", coalesce=True, validate="m:1")
+        .join(renault.select("note_id","party").with_columns(renaultAvailable=pl.lit(True)),
+              left_on="noteId", right_on="note_id", how="left", coalesce=True, validate="1:1")
+        .with_columns(createdAtDt = pl.from_epoch(pl.col("createdAtMillis"), time_unit="ms"))
+        .with_columns(createdAtMonth = pl.col("createdAtDt").dt.strftime("%Y-%m"))
+        .with_columns(ideoAvailable=pl.col("ideoAvailable").fill_null(False))
+        .with_columns(renaultAvailable=pl.col("renaultAvailable").fill_null(False))
+        # .filter(~pl.col("ideoAvailable"))
+        # .select(["tweet_author_id"])
+        # .filter(pl.col("tweet_author_id").is_not_null())
+        # .unique()
+
+        .group_by("createdAtMonth")
+        .agg(n=pl.len(), 
+             nWithIdeo=pl.col("ideoAvailable").sum(), pctWithIdeo=pl.col("ideoAvailable").mean(),
+                nWithRenault=pl.col("renaultAvailable").sum(), pctWithRenault=pl.col("renaultAvailable").mean()
+            )
+        .sort("createdAtMonth")
+
+
+        # .group_by(pl.lit(1))
+        # .agg(n=pl.len(), 
+        #      nWithIdeo=pl.col("ideoAvailable").sum(), pctWithIdeo=pl.col("ideoAvailable").mean(),
+        #         nWithRenault=pl.col("renaultAvailable").sum(), pctWithRenault=pl.col("renaultAvailable").mean()
+        #     )
+    )
+    return
+
+
+@app.cell
+def _(notes, pl):
+    (
+        notes
+        .select(["tweet_author_id"])
+        .filter(pl.col("tweet_author_id").is_not_null())
+        .unique()
+    )
+    return
 
 
 @app.cell
