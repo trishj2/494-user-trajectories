@@ -171,8 +171,8 @@ def _enrich_with_first_action(
     return notes, ratings, requests, first_action
 
 
-def _enrich_with_post_data(
-    _notes: pl.DataFrame,
+def _enrich_with_post_lang_and_author(
+    notes: pl.DataFrame,
 ) -> pl.DataFrame:
     _our_post_data = (
         pl.scan_parquet("/data/cn_archive/derivatives/20260227_raw_posts.parquet")
@@ -222,7 +222,7 @@ def _enrich_with_post_data(
     # Coalesce 
     _post_data = (
         _post_data.with_columns(
-            post_id = pl.coalesce(["post_id", "tweet_id"]),
+            post_id = pl.coalesce(["post_id", "tweet_id"]).cast(pl.Int64),
             tweet_author_id = pl.coalesce(["tweet_author_id", "tweet_author_id_renault"]),
             tweet_lang = pl.coalesce(["tweet_lang", "tweet_lang_renault"]))
         .rename({"post_id": "tweetId"})
@@ -230,11 +230,10 @@ def _enrich_with_post_data(
     )
     
     # Join notes to post data
-    _notes = (
-        _notes
-        .join(_post_data, on="tweetId", how="left", coalesce=True, validate="m:1")
-    )
-    return _notes
+    notes = notes.join(_post_data, on="tweetId", how="left", coalesce=True, validate="m:1")
+
+    logger.info("Enriched notes with post language and author id")
+    return notes
 
 
 def _enrich_with_renault_author_party(
@@ -277,6 +276,7 @@ def _enrich_with_renault_author_party(
         tweet_author_party=pl.coalesce([pl.col("author_party"), pl.col("post_party"), pl.col("note_party")])
     ).drop("author_party", "post_party", "note_party")
     
+    logger.info("Enriched notes with Renault author party labels")
     return notes
 
 
@@ -334,7 +334,7 @@ if __name__ == "__main__":
     requests = _enrich_with_user_and_calendar_month(requests)
     logger.info("Calculated user months and calendar months")
 
-    notes = _enrich_with_post_data(notes)
+    notes = _enrich_with_post_lang_and_author(notes)
     notes = _enrich_with_renault_author_party(notes)
     ratings = _enrich_ratings_with_note_data(ratings, notes)
     requests = _enrich_requests_with_outcomes(requests, notes)
