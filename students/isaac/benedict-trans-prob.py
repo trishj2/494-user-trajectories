@@ -172,13 +172,13 @@ def _(pl):
         expr = pl.lit(None, dtype=pl.String)
         for label, condition in reversed(rules):
             expr = pl.when(condition).then(pl.lit(label)).otherwise(expr)
-    
+
         # Extract ordered labels from rules
         activity_levels = [label for label, _ in total_activity_rules]
-    
+
         # Make the column an ordered categorical with the specified levels
         expr = expr.cast(pl.Enum(activity_levels))
-    
+
         return expr
 
     return apply_rules, month_activity_rules, total_activity_rules
@@ -522,11 +522,6 @@ def _(colorsys, mo, pl, px, user_months):
 
 
 @app.cell
-def _():
-    return
-
-
-@app.cell
 def _(month_activity_rules, pl, users):
     users.group_by("total_role").agg(
         n = pl.len(),
@@ -537,7 +532,7 @@ def _(month_activity_rules, pl, users):
         pct_having_requested = (pl.col("notesRequested") > 0).mean(),
         medianActiveWindow = pl.col("activeWindow").median(),
         *[(pl.col(f"nMonths{role}")).mean().alias(f"avg_nMonths{role}") for role, _ in month_activity_rules[:-1]],
-        *[(pl.col(f"pctActiveMonths{role}")).mean().alias(f"avg_pctActiveMonths{role}") for role, _ in month_activity_rules[:-1]]
+        *[((pl.col(f"pctActiveMonths{role}")).mean() * 100).alias(f"avg_pctActiveMonths{role}") for role, _ in month_activity_rules[:-1]]
     ).sort("total_role")
     return
 
@@ -732,7 +727,6 @@ def _(classified_panel_df, pl):
             "next_state",
         )
     )
-
 
     return (transitions_by_month,)
 
