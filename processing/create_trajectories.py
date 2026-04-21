@@ -10,8 +10,8 @@ _rated_helpful = pl.col("helpfulnessLevel") == "HELPFUL"
 _rated_not_helpful = pl.col("helpfulnessLevel") != "HELPFUL"
 _pos_factor = pl.col("noteFinalFactor") > 0
 _neg_factor = pl.col("noteFinalFactor") < 0
-_posted_by_dem = pl.col("postAuthorParty") == "democrat"
-_posted_by_rep = pl.col("postAuthorParty") == "republican"
+_posted_by_dem = pl.col("tweet_author_party") == "democrat"
+_posted_by_rep = pl.col("tweet_author_party") == "republican"
 _note_claims_misinfo = pl.col("classification") == "MISINFORMED_OR_POTENTIALLY_MISLEADING"
 _note_claims_not_misinfo = pl.col("classification") == "NOT_MISLEADING"
 _ever_crh = pl.col("noteEverCrh")
@@ -171,23 +171,121 @@ def _enrich_with_first_action(
     return notes, ratings, requests, first_action
 
 
-def _enrich_with_partisanship(
-    notes: pl.DataFrame, ratings: pl.DataFrame,
-) -> tuple[pl.DataFrame, pl.DataFrame]:
-    partisanship= pl.read_csv("data/renault_partisanship_labels.csv") # Partisanship data is from paper: "Republicans are flagged more often than Democrats for sharing misinformation on X's Community Notes" by Renault et al.
-    party_cols = partisanship.select("note_id", "party").rename({"party": "postAuthorParty"})
-    notes   = notes  .join(party_cols, left_on="noteId", right_on="note_id", coalesce=True, how="left", validate="1:1")
-    ratings = ratings.join(party_cols, left_on="noteId", right_on="note_id", coalesce=True, how="left", validate="m:1")
-    # TODO: Partisanship for note requests?
-    logger.info("Enriched notes and ratings with partisanship labels")
-    return notes, ratings
+def _enrich_with_post_data(
+    _notes: pl.DataFrame,
+) -> pl.DataFrame:
+    _our_post_data = (
+        pl.scan_parquet("/data/cn_archive/derivatives/20260227_raw_posts.parquet")
+        .select("post_id", "author_id", "lang")
+        .filter(pl.col("author_id").is_not_null() | pl.col("lang").is_not_null())
+        .collect()
+        # Select first non null lang/author_id
+        .group_by("post_id")
+        .agg(
+            tweet_author_id = pl.col("author_id").filter(pl.col("author_id").is_not_null()).first(),
+            tweet_lang = pl.col("lang").filter(pl.col("lang").is_not_null()).first(),
+            n_non_null_author_id = pl.col("author_id").filter(pl.col("author_id").is_not_null()).n_unique(),
+            n_non_null_lang = pl.col("lang").filter(pl.col("lang").is_not_null()).n_unique()))
+
+    _renault_post_data = (
+        pl.read_csv(
+            "data/renault_partisanship_labels.csv", 
+            schema_overrides={"tweet_author_id": pl.String, "tweet_id": pl.String})
+        .group_by("tweet_id")
+        .agg(
+            tweet_author_id = pl.col("tweet_author_id").filter(pl.col("tweet_author_id").is_not_null()).first(),
+            n_non_null_author_id = pl.col("tweet_author_id").filter(pl.col("tweet_author_id").is_not_null()).n_unique())
+        .with_columns(tweet_lang=pl.lit("en")) # Renault data only contains English tweets (see M&M)
+    )
+
+    # Make sure no contradictory values within a dataset
+    assert _our_post_data.filter(pl.col("n_non_null_author_id") > 1).is_empty()
+    assert _our_post_data.filter(pl.col("n_non_null_lang") > 1).is_empty()
+    assert _renault_post_data.filter(pl.col("n_non_null_author_id") > 1).is_empty()
+
+    # Join renault/our data
+    _post_data = (
+        _our_post_data.select("post_id", "tweet_author_id", "tweet_lang")
+        .join(_renault_post_data.select("tweet_id", "tweet_author_id", "tweet_lang"), 
+            left_on="post_id", right_on="tweet_id",
+            how="full", validate="1:1", suffix="_renault")
+    )
+
+    # Make sure no contradictory values between datasets
+    assert _post_data.filter(
+        pl.col("tweet_author_id").is_not_null() & pl.col("tweet_author_id_renault").is_not_null() 
+        & (pl.col("tweet_author_id") != pl.col("tweet_author_id_renault"))).is_empty()
+    assert _post_data.filter(
+        pl.col("tweet_lang").is_not_null() & pl.col("tweet_lang_renault").is_not_null() 
+        & (pl.col("tweet_lang") != pl.col("tweet_lang_renault"))).is_empty()
+
+    # Coalesce 
+    _post_data = (
+        _post_data.with_columns(
+            post_id = pl.coalesce(["post_id", "tweet_id"]),
+            tweet_author_id = pl.coalesce(["tweet_author_id", "tweet_author_id_renault"]),
+            tweet_lang = pl.coalesce(["tweet_lang", "tweet_lang_renault"]))
+        .rename({"post_id": "tweetId"})
+        .select("tweetId", "tweet_author_id", "tweet_lang")
+    )
+    
+    # Join notes to post data
+    _notes = (
+        _notes
+        .join(_post_data, on="tweetId", how="left", coalesce=True, validate="m:1")
+    )
+    return _notes
+
+
+def _enrich_with_renault_author_party(
+    notes: pl.DataFrame,
+) -> pl.DataFrame:
+    _renault = pl.read_csv(
+        "data/renault_partisanship_labels.csv", 
+        schema_overrides={"note_id": pl.String, "tweet_author_id": pl.String, "tweet_id": pl.String})
+
+    _renault_authors = _renault.select(["tweet_author_id", "party"]).unique().rename({"party": "author_party"})
+    _renault_posts = _renault.select(["tweet_id", "party"]).unique().rename({"party": "post_party"})
+    _renault_notes = _renault.select(["note_id", "party"]).unique().rename({"party": "note_party"})
+
+    notes = (
+        notes
+        .join(
+            _renault_authors, on="tweet_author_id", 
+            how="left", coalesce=True, validate="m:1")
+        .join(
+            _renault_posts, left_on="tweetId", right_on="tweet_id", 
+            how="left", coalesce=True, validate="m:1")
+        .join(
+            _renault_notes, left_on="noteId", right_on="note_id", 
+            how="left", coalesce=True, validate="m:1")
+    )
+
+    # Make sure there aren't contradictory labels for the same note/author/post
+    assert notes.filter(
+        pl.col("author_party").is_not_null() & pl.col("post_party").is_not_null() 
+        & (pl.col("author_party") != pl.col("post_party"))).is_empty()
+    assert notes.filter(
+        pl.col("author_party").is_not_null() & pl.col("note_party").is_not_null() 
+        & (pl.col("author_party") != pl.col("note_party"))).is_empty()
+    assert notes.filter(
+        pl.col("post_party").is_not_null() & pl.col("note_party").is_not_null() 
+        & (pl.col("post_party") != pl.col("note_party"))).is_empty()
+
+    # Coalesce
+    notes = notes.with_columns(
+        tweet_author_party=pl.coalesce([pl.col("author_party"), pl.col("post_party"), pl.col("note_party")])
+    ).drop("author_party", "post_party", "note_party")
+    
+    return notes
+
 
 
 def _enrich_ratings_with_note_data(
     ratings: pl.DataFrame, notes: pl.DataFrame,
 ) -> pl.DataFrame:
     ratings = ratings.join(
-        notes.select("noteId", "noteEverCrh", "noteFinalFactor", "noteFinalIntercept", "topic", "postAuthorParty", "classification"),
+        notes.select("noteId", "noteEverCrh", "noteFinalFactor", "noteFinalIntercept", "topic", "tweet_author_party", "tweet_lang"),
         on="noteId",
         how="left",
         validate="m:1"
@@ -236,7 +334,8 @@ if __name__ == "__main__":
     requests = _enrich_with_user_and_calendar_month(requests)
     logger.info("Calculated user months and calendar months")
 
-    notes, ratings = _enrich_with_partisanship(notes, ratings)
+    notes = _enrich_with_post_data(notes)
+    notes = _enrich_with_renault_author_party(notes)
     ratings = _enrich_ratings_with_note_data(ratings, notes)
     requests = _enrich_requests_with_outcomes(requests, notes)
 
@@ -250,6 +349,12 @@ if __name__ == "__main__":
         avgNoteIntercept=pl.col("noteFinalIntercept").mean(),
         topicsTargeted=pl.col("topic").filter(pl.col("topic").is_not_null()).n_unique(),
         avgRatingsEarned=pl.col("numRatings").mean(),
+
+        antiDemNotes    =(_posted_by_dem & _note_claims_misinfo).sum(),
+        proDemNotes     =(_posted_by_dem & _note_claims_not_misinfo).sum(),
+        antiRepNotes    =(_posted_by_rep & _note_claims_misinfo).sum(),
+        proRepNNotes     =(_posted_by_rep & _note_claims_not_misinfo).sum(),
+
         *[
             pl.col("condensed_topic")
             .filter(pl.col("condensed_topic") == topic)
