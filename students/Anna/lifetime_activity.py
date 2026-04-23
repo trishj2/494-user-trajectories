@@ -190,48 +190,58 @@ def _(mo, px, role_counts):
 
 
 @app.cell
-def _(go, mo, pl, users):
+def _(go, pl, users):
     # Sankey chart: role in first active month vs lifetime role.
     sankey_df = (
-        users.filter(
-            pl.col("firstMonthRole").is_not_null() & pl.col("total_role").is_not_null()
+        users
+        .filter(
+            pl.col("firstMonthRole").is_not_null() &
+            pl.col("total_role").is_not_null()
+        )
+        .with_columns(
+            pl.col("firstMonthRole").cast(pl.String),
+            pl.col("total_role").cast(pl.String),
         )
         .group_by(["firstMonthRole", "total_role"])
         .agg(value=pl.len())
-        .with_columns(
-            firstMonthRole=pl.col("firstMonthRole").cast(pl.String),
-            total_role=pl.col("total_role").cast(pl.String),
-        )
     )
 
-    if sankey_df.height == 0:
-        sankey_plot = mo.md(
-            "No valid first-role to lifetime-role transitions found for the current data."
-        )
-    else:
-        left_nodes = sankey_df.get_column("firstMonthRole").unique().to_list()
-        right_nodes = sankey_df.get_column("total_role").unique().to_list()
-        labels = [f"first: {x}" for x in left_nodes] + [f"lifetime: {x}" for x in right_nodes]
+    left_nodes = sankey_df["firstMonthRole"].unique().to_list()
+    right_nodes = sankey_df["total_role"].unique().to_list()
 
-        left_idx = {k: i for i, k in enumerate(left_nodes)}
-        right_idx = {k: i + len(left_nodes) for i, k in enumerate(right_nodes)}
+    labels = [f"first: {x}" for x in left_nodes] + [f"lifetime: {x}" for x in right_nodes]
 
-        source = [left_idx[a] for a in sankey_df.get_column("firstMonthRole").to_list()]
-        target = [right_idx[b] for b in sankey_df.get_column("total_role").to_list()]
-        value = sankey_df.get_column("value").to_list()
+    left_idx = {k: i for i, k in enumerate(left_nodes)}
+    right_idx = {k: i + len(left_nodes) for i, k in enumerate(right_nodes)}
 
-        fig_sankey = go.Figure(
-            data=[
-                go.Sankey(
-                    node=dict(label=labels, pad=15, thickness=18),
-                    link=dict(source=source, target=target, value=value),
-                )
-            ]
-        )
-        fig_sankey.update_layout(title_text="First Active Role to Lifetime Role", font_size=11)
-        sankey_plot = mo.ui.plotly(fig_sankey)
+    source = [left_idx[x] for x in sankey_df["firstMonthRole"].to_list()]
+    target = [right_idx[x] for x in sankey_df["total_role"].to_list()]
+    value = sankey_df["value"].to_list()
 
-    sankey_plot
+    sankey_fig = go.Figure(
+        data=[
+            go.Sankey(
+                node=dict(
+                    label=labels,
+                    pad=15,
+                    thickness=18,
+                ),
+                link=dict(
+                    source=source,
+                    target=target,
+                    value=value,
+                ),
+            )
+        ]
+    )
+
+    sankey_fig.update_layout(
+        title_text="First Active Role to Lifetime Role",
+        font_size=11,
+        height=650,
+    )
+
+    sankey_fig
     return
 
 
