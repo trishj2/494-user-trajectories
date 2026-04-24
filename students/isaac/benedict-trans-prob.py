@@ -16,6 +16,8 @@ def _():
     from datetime import date
     import colorsys
 
+
+
     return Path, colorsys, go, mo, pl, plt, px
 
 
@@ -30,105 +32,40 @@ def _(mo):
 @app.cell
 def _(Path, pl):
     # Load data
-    archive_dir = Path("../../data")
+    data_dir = Path("../../data/") 
 
-    note_path = archive_dir / "user_note_traj.parquet"
-    rating_path = archive_dir / "user_rating_traj.parquet"
-    request_path = archive_dir / "user_request_traj.parquet"
-
-    notes = (
-        pl.read_parquet(note_path)
-        .select(["noteAuthorParticipantId", "userMonth", "calendarMonth", "notesCreated"])
-        .rename(
-            {
-                "noteAuthorParticipantId": "participantId",
-                "notesCreated": "notesWritten",
-            }
-        )
-    )
-
-    ratings = (
-        pl.read_parquet(rating_path)
-        .select(["raterParticipantId", "userMonth", "calendarMonth", "notesRated"])
-        .rename({"raterParticipantId": "participantId"})
-    )
-
-    requests = (
-        pl.read_parquet(request_path)
-        .select(["requesterParticipantId", "userMonth", "calendarMonth", "requestsMade"])
-        .rename(
-            {
-                "requesterParticipantId": "participantId",
-                "requestsMade": "notesRequested",
-            }
-        )
-    )
-    return notes, ratings, requests
+    user_months = pl.read_parquet(data_dir / "output" / "user_month_traj.parquet")
+    return data_dir, user_months
 
 
 @app.cell
-def _(apply_rules, month_activity_rules, notes, pl, ratings, requests):
-    user_months = (
-        notes.join(
-            ratings, how="full", coalesce=True,
-            on=["participantId", "userMonth", "calendarMonth"],)
-        .join(
-            requests, how="full", coalesce=True,
-            on=["participantId", "userMonth", "calendarMonth"],)
-        .with_columns(
-            calendarDate=pl.col("calendarMonth").str.strptime(pl.Date, "%Y-%m"),
-            activeMonth=(pl.col("notesWritten").fill_null(0) + pl.col("notesRated").fill_null(0) + pl.col("notesRequested").fill_null(0)) > 0))
+def _(user_months):
+    user_months.select("userMonth","propPoliticalRatingsRepAligned")
+    return
 
 
-    # Build a df from users' first observed month to the last possible month
-    _when_users_joined = user_months.group_by("participantId").agg(
-        userFirstCalendarMonth=pl.col("calendarDate").min(),
-        userLastActiveCalendarMonth=pl.col("calendarDate").max())
-
-    calendar_max = user_months.select(pl.col("calendarDate").max()).row(0)[0]
-    calendar_min = user_months.select(pl.col("calendarDate").min()).row(0)[0]
-
-    _all_months = pl.DataFrame({
-            "calendarDate": pl.date_range(
-                start=calendar_min,
-                end=calendar_max,
-                interval="1mo",
-                eager=True)})
-
-    empty_user_months = (
-        _when_users_joined
-        .join(_all_months, how="cross")
-        .filter(pl.col("calendarDate") >= pl.col("userFirstCalendarMonth"))
-        .with_columns(
-            yearsSinceJoining = pl.col("calendarDate").dt.year() - pl.col("userFirstCalendarMonth").dt.year(),
-            monthsSinceJoining = pl.col("calendarDate").dt.month() - pl.col("userFirstCalendarMonth").dt.month(),
-        )
-        .with_columns(
-            userMonth = pl.col("yearsSinceJoining") * 12 + pl.col("monthsSinceJoining"),
-            calendarMonth = pl.col("calendarDate").dt.strftime("%Y-%m"),
-        )
-        .drop("userFirstCalendarMonth", "yearsSinceJoining", "monthsSinceJoining")
+@app.cell
+def _(data_dir, pl):
+    enriched_notes = (
+        pl.read_parquet(data_dir/ "intermediate" / "notes_enriched.parquet")
+        .with_columns(createdAtDt=pl.from_epoch(pl.col("createdAtMillis"), "ms").dt.replace_time_zone("UTC"))
+        .with_columns(createdAtMonth=pl.col("createdAtDt").dt.strftime("%Y-%m"))
     )
+    return (enriched_notes,)
 
 
-    user_months = (
-        user_months
-        .join(
-            empty_user_months, how="full", coalesce=True,
-            on=["participantId", "userMonth", "calendarMonth", "calendarDate"])
-        .with_columns(
-                pl.col("notesWritten").fill_null(0),
-                pl.col("notesRated").fill_null(0),
-                pl.col("notesRequested").fill_null(0),
-                pl.col("activeMonth").fill_null(False),)
-        .sort(["participantId", "calendarMonth", "userMonth"])
-        .with_columns(month_role=apply_rules(month_activity_rules)))
-    return (user_months,)
+@app.cell
+def _(enriched_notes, pl):
+    (        enriched_notes
+            .filter(pl.col("tweet_lang") == "en")
+            .with_columns(we_have_author_id = pl.col("tweet_author_id").is_not_null()))
+    return
 
 
 @app.cell
 def _(pl):
-    total_activity_rules = [
+    monthly_activity_levels = [
+        # NB: Order matters; first match takes precedence.
         ("4_digit_writer",      pl.col("notesWritten") >= 1000),
         ("triple_digit_writer", pl.col("notesWritten") >= 100),
         ("double_digit_writer", pl.col("notesWritten") >= 10),
@@ -149,49 +86,64 @@ def _(pl):
 
         ("not_active", pl.lit(True)),
     ]
-
-    month_activity_rules = [
-        ("double_digit_writer", pl.col("notesWritten") >= 10),
-        ("single_digit_writer", pl.col("notesWritten") >= 2),
-        ("single_note_writer",  pl.col("notesWritten") == 1),
-
-        ("double_digit_rater",  pl.col("notesRated") >= 10),
-        ("single_digit_rater",  pl.col("notesRated") >= 2),
-        ("single_note_rater",   pl.col("notesRated") == 1),
-
-        ("double_digit_requestor", pl.col("notesRequested") >= 10),
-        ("single_digit_requestor", pl.col("notesRequested") >= 2),
-        ("single_post_requestor",  pl.col("notesRequested") == 1),
-
-        ("not_active", pl.lit(True)),
-    ]
-
-    # Build the classification expression from rules
-    def apply_rules(rules):
-        # Apply rules in reverse order to ensure first match takes precedence
-        expr = pl.lit(None, dtype=pl.String)
-        for label, condition in reversed(rules):
-            expr = pl.when(condition).then(pl.lit(label)).otherwise(expr)
-
-        # Extract ordered labels from rules
-        activity_levels = [label for label, _ in total_activity_rules]
-
-        # Make the column an ordered categorical with the specified levels
-        expr = expr.cast(pl.Enum(activity_levels))
-
-        return expr
-
-    return apply_rules, month_activity_rules, total_activity_rules
+    return (monthly_activity_levels,)
 
 
 @app.cell
-def _(
-    apply_rules,
-    month_activity_rules,
-    pl,
-    total_activity_rules,
-    user_months,
-):
+def _():
+    # _monthly_totals = (
+    #         enriched_notes
+    #         .with_columns(tweet_author_party=pl.col("tweet_author_party").fill_null("unknown"))
+    #         .with_columns(in_english = pl.col("tweet_lang").is_not_null() & (pl.col("tweet_lang") == "en"))
+    #         .with_columns(we_have_author_id = pl.col("tweet_author_id").is_not_null())
+    #         .group_by("createdAtMonth", "we_have_author_id", "in_english")
+    #         .agg(total_notes=pl.len())
+    # )
+
+    # (
+    #     enriched_notes
+    #         .with_columns(we_have_author_id = pl.col("tweet_author_id").is_not_null())
+    #         .with_columns(in_english = pl.col("tweet_lang").is_not_null() & (pl.col("tweet_lang") == "en"))
+    #         .with_columns(tweet_author_party=pl.col("tweet_author_party").fill_null("unknown"))
+    #         .group_by("createdAtMonth", "we_have_author_id", "tweet_author_party", "in_english")
+    #         .len()
+    #         .join(_monthly_totals, on=["createdAtMonth", "we_have_author_id", "in_english"], how="left")
+    #         .with_columns(pct=pl.col("len") / pl.col("total_notes") * 100)
+    #         .pivot(index=["createdAtMonth", "we_have_author_id", "in_english"], on="tweet_author_party").sort("createdAtMonth")
+    #         .select("createdAtMonth", "we_have_author_id", "in_english", "pct_unknown")
+    #         .sort("createdAtMonth", "we_have_author_id", "in_english")
+    #         .with_columns(label=pl.format("Author ID: {} | English: {} ", pl.col("we_have_author_id"), pl.col("in_english")))
+    #     .pivot(index="createdAtMonth", on="label", values="pct_unknown").sort("createdAtMonth")
+    # )
+    return
+
+
+@app.cell
+def _(pl, user_months):
+    writers = (
+        user_months
+        .filter(pl.col("month_role").is_in(["double_digit_rater"]))
+        .select("participantId")
+        .unique()
+    )
+    return (writers,)
+
+
+@app.cell
+def _(user_months, writers):
+    (
+        user_months.join(writers, on = "participantId", how = "inner")
+        .select(
+            "calendarMonth", "userMonth", "month_role", 
+            "notesWritten", "notesRated", "notesRequested", 
+            "propPoliticalRatingsRepAligned", "propRatingsOnPoliticalNotes",
+        )
+    )
+    return
+
+
+@app.cell
+def _(monthly_activity_levels, pl, user_months):
     users = (
         user_months
         .group_by("participantId")
@@ -200,17 +152,16 @@ def _(
             notesRated = pl.col("notesRated").sum(),
             notesRequested = pl.col("notesRequested").sum(),
             userFirstCalendarMonth = pl.col("calendarMonth").min(),
-            userLastActiveCalendarMonth = pl.col("userLastActiveCalendarMonth").max(),
+            # userLastActiveCalendarMonth = pl.col("userLastActiveCalendarMonth").max(),
             nActiveMonths = pl.col("activeMonth").sum(),
             age = pl.col("userMonth").max(),
             activeWindow = pl.col("userMonth").filter(pl.col("activeMonth")).max() - pl.col("userMonth").min() + 1,
             firstMonthRole = pl.col("month_role").filter(pl.col("activeMonth")).first(),
             lastMonthRole = pl.col("month_role").filter(pl.col("activeMonth")).last(),
-            *[(pl.col("month_role") == role).sum().alias(f"nMonths{role}") for role, _ in month_activity_rules[:-1]],
+            *[(pl.col("month_role") == role).sum().alias(f"nMonths{role}") for role, _ in monthly_activity_levels[:-1]],
         )
         .with_columns(
-            total_role=apply_rules(total_activity_rules),
-            *[(pl.col(f"nMonths{role}") / pl.col("activeWindow")).alias(f"pctActiveMonths{role}") for role, _ in month_activity_rules[:-1]]
+            *[(pl.col(f"nMonths{role}") / pl.col("activeWindow")).alias(f"pctActiveMonths{role}") for role, _ in monthly_activity_levels[:-1]]
         )
     )
     return (users,)
@@ -263,27 +214,51 @@ def _(pl, users):
 
 
 @app.cell
-def _(cohort_df, mo, px):
+def _(cohort_df):
+    cohort_df
+    return
 
-    _fig = px.line(
-        cohort_df,
+
+@app.cell
+def _():
+    import seaborn as sns
+
+    return (sns,)
+
+
+@app.cell
+def _(users):
+    users
+    return
+
+
+@app.cell
+def _(pl, plt, sns, users):
+    # Plot mean lifetime by cohort month and first role
+    _fig = sns.lineplot(
+        users.filter(
+            pl.col("firstMonthRole").cast(pl.String).str.starts_with("single") 
+            | pl.col("firstMonthRole").cast(pl.String).str.starts_with("double") 
+        ).sort("userFirstCalendarMonth")
+        .with_columns(propActiveMonths = pl.col("nActiveMonths") / pl.col("activeWindow")),
         x="userFirstCalendarMonth",
-        y="median_lifetime",
-        color="firstMonthRole",
-        markers=True,
-        title="Median Lifetime by Cohort Month and Role",
-        labels={
-            "userFirstCalendarMonth": "First Calendar Month",
-            "median_lifetime": "Median Lifetime",
-        },
-        height=550 ,
+        hue="firstMonthRole",
+        y="propActiveMonths",
+        estimator="mean",
+
+        # No legend
+        legend=False,
+    
     )
 
-    _fig.update_yaxes(matches=None)
-    _fig.for_each_annotation(lambda a: a.update(text=a.text.split("=")[-1]))
 
 
-    mo.ui.plotly(_fig)
+    # 45 degree rotation of x axis
+    plt.xticks(rotation=45, ha="right")
+    plt.title("Mean Lifetime (N Active Months) by Cohort Month and First Role")
+
+
+    _fig
     return
 
 
@@ -301,7 +276,7 @@ def _(cohort_df, mo, px, role_colors):
             "userFirstCalendarMonth": "First Calendar Month",
             "median_active_months": "Median N Active Months",
         },
-        height=550 ,
+        height=550,
     )
 
     _fig.update_yaxes(matches=None)
@@ -313,9 +288,12 @@ def _(cohort_df, mo, px, role_colors):
 
 
 @app.cell
-def _(cohort_df, mo, px, role_colors):
+def _(cohort_df, mo, pl, px, role_colors):
     _fig = px.line(
-        cohort_df,
+        cohort_df.filter(
+            pl.col("firstMonthRole").cast(pl.String).str.starts_with("single") 
+            | pl.col("firstMonthRole").cast(pl.String).str.starts_with("double") 
+        ),
         x="userFirstCalendarMonth",
         y="n",
         color="firstMonthRole",
@@ -727,7 +705,6 @@ def _(classified_panel_df, pl):
             "next_state",
         )
     )
-
     return (transitions_by_month,)
 
 
