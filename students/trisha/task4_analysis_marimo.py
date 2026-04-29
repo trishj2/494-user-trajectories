@@ -96,13 +96,10 @@ def _(mo):
 
 @app.cell
 def _(plt, traj2):
-    # All months (not just active)
     active = traj2.copy()
 
-    # Use all activity tiers directly as stack segments (drop Inactive)
     _all_tiers = [t for t in active['activity_tier'].cat.categories if t != 'Inactive']
 
-    # Assign one color per tier from tab20
     _cmap   = plt.cm.get_cmap('tab20', len(_all_tiers))
     _colors = [_cmap(i) for i in range(len(_all_tiers))]
 
@@ -110,7 +107,6 @@ def _(plt, traj2):
                    'ok_notes',  'ok_ratings',  'ok_requests']
     _bar_labels = ['Notes', 'Ratings', 'Requests', 'Notes', 'Ratings', 'Requests']
 
-    # Raw counts per tier
     _raw = {}
     for _g in _all_tiers:
         _s = active[active['activity_tier'] == _g]
@@ -123,7 +119,6 @@ def _(plt, traj2):
             'ok_requests':  _s['numRequestsResultingInCrh'].sum(),
         }
 
-    # Normalise each bar to 100 %
     _totals = {k: sum(_raw[g][k] for g in _all_tiers) for k in _bar_keys}
     _pcts   = {g: {k: _raw[g][k] / (_totals[k] + 1e-9) * 100
                    for k in _bar_keys}
@@ -143,11 +138,9 @@ def _(plt, traj2):
                          ha='center', va='center', fontsize=8, color='white', fontweight='bold')
         _bottoms = [b + v for b, v in zip(_bottoms, _vals)]
 
-    # x-axis tick labels (bar type names)
     _ax.set_xticks(_x)
     _ax.set_xticklabels(_bar_labels, fontsize=9)
 
-    # Dark vertical divider between All and Helpful groups
     _ax.axvline(3, color='#222222', linewidth=1.5)
 
     # Subtle grey gridlines
@@ -167,7 +160,6 @@ def _(plt, traj2):
     plt.savefig('q1_stacked_bar.png', bbox_inches='tight')
     plt.show()
 
-    # Keep vol for Q2 tables
     vol = active.groupby('activity_tier', observed=True).agg(
         total_notes_written=('notesWritten',   'sum'),
         total_notes_rated  =('notesRated',     'sum'),
